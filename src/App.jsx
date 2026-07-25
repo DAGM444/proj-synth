@@ -8,6 +8,7 @@ import ScrollToTop from "./components/ScrollToTop";
 import AppShell from "@/components/AppShell";
 import Home from "@/pages/Home";
 import Search from "@/pages/Search";
+import Playlist from "@/pages/Playlist";
 
 function App() {
   return (
@@ -19,6 +20,7 @@ function App() {
             <Route element={<AppShell />}>
               <Route path="/" element={<Home />} />
               <Route path="/search" element={<Search />} />
+              <Route path="/playlist" element={<Playlist />} />
             </Route>
             <Route path="*" element={<PageNotFound />} />
           </Routes>
