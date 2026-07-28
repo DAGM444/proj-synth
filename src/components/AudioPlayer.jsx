@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 import { Slider } from "@/components/ui/slider";
 import QueuePanel from "@/components/QueuePanel";
-import LyricsOverlay from "@/components/LyricsOverlay";
+import FullScreenLyrics from "@/components/FullScreenLyrics";
 
 export default function AudioPlayer() {
   const [isPlaying, setIsPlaying] = useState(true);
@@ -184,7 +184,7 @@ export default function AudioPlayer() {
       </footer>
 
       <QueuePanel open={queueOpen} onClose={() => setQueueOpen(false)} />
-      <LyricsOverlay open={lyricsOpen} onClose={() => setLyricsOpen(false)} />
+      <FullScreenLyrics open={lyricsOpen} onClose={() => setLyricsOpen(false)} />
     </>
   );
 }
