@@ -1,59 +1,87 @@
-import React, { useState, useEffect } from 'react';
-import { searchTracks, getStreamUrl } from '../services/api';
+import React, { useRef, useEffect, useState } from 'react';
+import { getStreamUrl } from '@/services/api';
 
-export default function SearchPage({ onPlayTrack }) {
-  const [query, setQuery] = useState('');
-  const [results, setResults] = useState([]);
-  const [loading, setLoading] = useState(false);
+export default function AudioPlayer({ currentTrack }) {
+  const audioRef = useRef(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [progress, setProgress] = useState(0);
 
   useEffect(() => {
-    const timer = setTimeout(async () => {
-      if (query.trim()) {
-        setLoading(true);
-        const tracks = await searchTracks(query);
-        setResults(tracks);
-        setLoading(false);
-      } else {
-        setResults([]);
-      }
-    }, 400); // 400ms debounce to avoid spamming the backend
+    if (currentTrack && audioRef.current) {
+      audioRef.current.src = getStreamUrl(currentTrack.id);
+      audioRef.current.play()
+        .then(() => setIsPlaying(true))
+        .catch((err) => console.error("Playback error:", err));
 
-    return () => clearTimeout(timer);
-  }, [query]);
+      if ('mediaSession' in navigator) {
+        navigator.mediaSession.metadata = new MediaMetadata({
+          title: currentTrack.title,
+          artist: currentTrack.artist,
+          artwork: [{ src: currentTrack.thumbnail }]
+        });
+      }
+    }
+  }, [currentTrack]);
+
+  const togglePlay = () => {
+    if (!audioRef.current) return;
+    if (isPlaying) {
+      audioRef.current.pause();
+      setIsPlaying(false);
+    } else {
+      audioRef.current.play();
+      setIsPlaying(true);
+    }
+  };
+
+  const handleTimeUpdate = () => {
+    if (audioRef.current && audioRef.current.duration) {
+      const current = audioRef.current.currentTime;
+      const duration = audioRef.current.duration;
+      setProgress((current / duration) * 100);
+    }
+  };
+
+  if (!currentTrack) return null;
 
   return (
-    <div className="p-6 bg-[#121212] min-h-screen text-white">
-      {/* Search Input */}
-      <input
-        type="text"
-        placeholder="What do you want to listen to?"
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-        className="w-full max-w-md p-3 rounded-full bg-[#242424] text-white border-none outline-none focus:ring-2 focus:ring-green-500"
+    <div className="fixed bottom-0 left-0 right-0 h-20 bg-[#181818] border-t border-[#282828] px-4 flex items-center justify-between text-white z-50">
+      <audio 
+        ref={audioRef} 
+        onTimeUpdate={handleTimeUpdate} 
+        onEnded={() => setIsPlaying(false)} 
       />
 
-      {loading && <p className="mt-4 text-gray-400">Searching YouTube...</p>}
-
-      {/* Results Table */}
-      <div className="mt-6">
-        {results.map((track, index) => (
-          <div
-            key={track.id}
-            onClick={() => onPlayTrack(track)}
-            className="flex items-center justify-between p-3 rounded-lg hover:bg-[#2a2a2a] cursor-pointer group transition"
-          >
-            <div className="flex items-center gap-4">
-              <span className="text-gray-400 w-4">{index + 1}</span>
-              <img src={track.thumbnail} alt={track.title} className="w-12 h-12 object-cover rounded" />
-              <div>
-                <p className="font-semibold text-white group-hover:text-green-500">{track.title}</p>
-                <p className="text-sm text-gray-400">{track.artist}</p>
-              </div>
-            </div>
-            <span className="text-sm text-gray-400">{track.duration}</span>
-          </div>
-        ))}
+      {/* Track Details */}
+      <div className="flex items-center gap-3 w-1/4 min-w-0">
+        <img 
+          src={currentTrack.thumbnail} 
+          alt={currentTrack.title} 
+          className="w-12 h-12 object-cover rounded shrink-0" 
+        />
+        <div className="min-w-0">
+          <p className="font-medium text-sm text-white truncate">{currentTrack.title}</p>
+          <p className="text-xs text-gray-400 truncate">{currentTrack.artist}</p>
+        </div>
       </div>
+
+      {/* Controls & Progress */}
+      <div className="flex flex-col items-center justify-center w-2/4 max-w-md">
+        <button
+          onClick={togglePlay}
+          className="bg-white text-black px-5 py-2 rounded-full font-bold text-sm hover:scale-105 transition"
+        >
+          {isPlaying ? 'Pause' : 'Play'}
+        </button>
+        <div className="w-full bg-[#3e3e3e] h-1 rounded-full mt-2 overflow-hidden">
+          <div 
+            className="bg-green-500 h-full transition-all duration-200" 
+            style={{ width: `${progress}%` }} 
+          />
+        </div>
+      </div>
+
+      <div className="w-1/4"></div>
     </div>
   );
 }
