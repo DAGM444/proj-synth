@@ -9,18 +9,25 @@ import AppShell from "@/components/AppShell";
 import Home from "@/pages/Home";
 import Search from "@/pages/Search";
 import Playlist from "@/pages/Playlist";
+import { useState } from "react";
 
 function App() {
+  const [currentTrack, setCurrentTrack] = useState(null);
+
+  const handlePlayTrack = (track) => {
+    setCurrentTrack(track);
+  };
+
   return (
     <AuthProvider>
       <QueryClientProvider client={queryClientInstance}>
         <Router>
           <ScrollToTop />
           <Routes>
-            <Route element={<AppShell />}>
-              <Route path="/" element={<Home />} />
-              <Route path="/search" element={<Search />} />
-              <Route path="/playlist" element={<Playlist />} />
+            <Route element={<AppShell currentTrack={currentTrack} />}>
+              <Route path="/" element={<Home onPlayTrack={handlePlayTrack} />} />
+              <Route path="/search" element={<Search onPlayTrack={handlePlayTrack} />} />
+              <Route path="/playlist" element={<Playlist onPlayTrack={handlePlayTrack} />} />
             </Route>
             <Route path="*" element={<PageNotFound />} />
           </Routes>
