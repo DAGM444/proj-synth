@@ -4,16 +4,20 @@ const http = require('http');
 const https = require('https');
 const YouTube = require('youtube-sr').default;
 const ytdl = require('@distube/ytdl-core');
+const { PrismaClient } = require('@prisma/client');
 require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+const prisma = new PrismaClient();
 
 // Enable CORS and JSON parsing
 app.use(cors());
 app.use(express.json());
 
-// 1. YouTube Search Endpoint
+// ==========================================
+// 1. YOUTUBE SEARCH ENDPOINT
+// ==========================================
 app.get('/api/search', async (req, res) => {
   try {
     const query = req.query.q;
@@ -37,7 +41,9 @@ app.get('/api/search', async (req, res) => {
   }
 });
 
-// 2. Live Audio Streaming Endpoint
+// ==========================================
+// 2. LIVE AUDIO STREAMING ENDPOINT
+// ==========================================
 app.get('/api/stream/:videoId', async (req, res) => {
   try {
     const videoId = req.params.videoId;
@@ -50,7 +56,6 @@ app.get('/api/stream/:videoId', async (req, res) => {
     res.setHeader('Accept-Ranges', 'bytes');
 
     const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
-    
     let streamHandled = false;
 
     try {
@@ -88,7 +93,6 @@ app.get('/api/stream/:videoId', async (req, res) => {
 });
 
 function pipeFallbackAudio(res) {
-  // Reliable sample MP3 fallback stream
   const fallbackUrl = 'http://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3';
   http.get(fallbackUrl, (fallbackRes) => {
     if (!res.headersSent) {
@@ -106,6 +110,115 @@ function pipeFallbackAudio(res) {
     }
   });
 }
+
+// ==========================================
+// 3. PHASE 4: PLAYLIST & LIBRARY DATABASE ROUTES
+// ==========================================
+
+// Get all playlists with their tracks
+app.get('/api/playlists', async (req, res) => {
+  try {
+    const playlists = await prisma.playlist.findMany({
+      include: { tracks: true },
+      orderBy: { createdAt: 'desc' }
+    });
+    res.json(playlists);
+  } catch (error) {
+    console.error('Fetch Playlists Error:', error);
+    res.status(500).json({ error: 'Failed to fetch playlists.' });
+  }
+});
+
+// Get a single playlist by ID with tracks
+app.get('/api/playlists/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const playlist = await prisma.playlist.findUnique({
+      where: { id },
+      include: { tracks: true }
+    });
+    if (!playlist) {
+      return res.status(404).json({ error: 'Playlist not found.' });
+    }
+    res.json(playlist);
+  } catch (error) {
+    console.error('Fetch Playlist Error:', error);
+    res.status(500).json({ error: 'Failed to fetch playlist.' });
+  }
+});
+
+// Create a new playlist
+app.post('/api/playlists', async (req, res) => {
+  try {
+    const { title, description } = req.body;
+    if (!title) {
+      return res.status(400).json({ error: 'Playlist title is required.' });
+    }
+
+    const newPlaylist = await prisma.playlist.create({
+      data: {
+        title,
+        description: description || ''
+      }
+    });
+    res.status(201).json(newPlaylist);
+  } catch (error) {
+    console.error('Create Playlist Error:', error);
+    res.status(500).json({ error: 'Failed to create playlist.' });
+  }
+});
+
+// Add a track to a playlist
+app.post('/api/playlists/:id/tracks', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { videoId, title, artist, duration, thumbnail } = req.body;
+
+    if (!videoId || !title) {
+      return res.status(400).json({ error: 'videoId and title are required.' });
+    }
+
+    const track = await prisma.track.create({
+      data: {
+        videoId,
+        title,
+        artist: artist || 'Unknown Artist',
+        duration: duration || '0:00',
+        thumbnail: thumbnail || '',
+        playlistId: id
+      }
+    });
+
+    res.status(201).json(track);
+  } catch (error) {
+    console.error('Add Track Error:', error);
+    res.status(500).json({ error: 'Failed to add track to playlist.' });
+  }
+});
+
+// Delete a track from a playlist
+app.delete('/api/tracks/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    await prisma.track.delete({ where: { id } });
+    res.json({ message: 'Track removed successfully.' });
+  } catch (error) {
+    console.error('Delete Track Error:', error);
+    res.status(500).json({ error: 'Failed to delete track.' });
+  }
+});
+
+// Delete an entire playlist
+app.delete('/api/playlists/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    await prisma.playlist.delete({ where: { id } });
+    res.json({ message: 'Playlist deleted successfully.' });
+  } catch (error) {
+    console.error('Delete Playlist Error:', error);
+    res.status(500).json({ error: 'Failed to delete playlist.' });
+  }
+});
 
 app.listen(PORT, () => {
   console.log(`Server listening on http://localhost:${PORT}`);

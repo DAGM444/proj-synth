@@ -10,13 +10,10 @@ export const searchTracks = async (query) => {
 
   try {
     const response = await fetch(`${BASE_URL}/search?q=${encodeURIComponent(query)}`);
-    
     if (!response.ok) {
       throw new Error(`Server returned status: ${response.status}`);
     }
-
-    const tracks = await response.json();
-    return tracks;
+    return await response.json();
   } catch (error) {
     console.error('API searchTracks Error:', error.message);
     return [];
@@ -31,4 +28,121 @@ export const searchTracks = async (query) => {
 export const getStreamUrl = (videoId) => {
   if (!videoId) return '';
   return `${BASE_URL}/stream/${videoId}`;
+};
+
+// ==========================================
+// PHASE 4: PLAYLIST & DATABASE API FUNCTIONS
+// ==========================================
+
+/**
+ * Fetches all playlists with their associated tracks.
+ * @returns {Promise<Array>} List of playlist objects.
+ */
+export const getPlaylists = async () => {
+  try {
+    const response = await fetch(`${BASE_URL}/playlists`);
+    if (!response.ok) throw new Error('Failed to fetch playlists');
+    return await response.json();
+  } catch (error) {
+    console.error('API getPlaylists Error:', error.message);
+    return [];
+  }
+};
+
+/**
+ * Fetches a single playlist by ID.
+ * @param {string} playlistId
+ * @returns {Promise<Object|null>} Playlist object or null.
+ */
+export const getPlaylistById = async (playlistId) => {
+  try {
+    const response = await fetch(`${BASE_URL}/playlists/${playlistId}`);
+    if (!response.ok) throw new Error('Playlist not found');
+    return await response.json();
+  } catch (error) {
+    console.error('API getPlaylistById Error:', error.message);
+    return null;
+  }
+};
+
+/**
+ * Creates a new playlist in the database.
+ * @param {string} title - Name of the playlist.
+ * @param {string} [description] - Optional playlist description.
+ * @returns {Promise<Object|null>} Created playlist object.
+ */
+export const createPlaylist = async (title, description = '') => {
+  try {
+    const response = await fetch(`${BASE_URL}/playlists`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title, description }),
+    });
+    if (!response.ok) throw new Error('Failed to create playlist');
+    return await response.json();
+  } catch (error) {
+    console.error('API createPlaylist Error:', error.message);
+    return null;
+  }
+};
+
+/**
+ * Adds a track to a specific playlist.
+ * @param {string} playlistId - ID of the target playlist.
+ * @param {Object} track - Track object ({ videoId, title, artist, duration, thumbnail }).
+ * @returns {Promise<Object|null>} Saved track record.
+ */
+export const addTrackToPlaylist = async (playlistId, track) => {
+  try {
+    const response = await fetch(`${BASE_URL}/playlists/${playlistId}/tracks`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        videoId: track.id || track.videoId,
+        title: track.title,
+        artist: track.artist,
+        duration: track.duration,
+        thumbnail: track.thumbnail,
+      }),
+    });
+    if (!response.ok) throw new Error('Failed to add track to playlist');
+    return await response.json();
+  } catch (error) {
+    console.error('API addTrackToPlaylist Error:', error.message);
+    return null;
+  }
+};
+
+/**
+ * Removes a track from a playlist by its database ID.
+ * @param {string} trackId - Database ID of the track record.
+ * @returns {Promise<boolean>} Success status.
+ */
+export const removeTrackFromPlaylist = async (trackId) => {
+  try {
+    const response = await fetch(`${BASE_URL}/tracks/${trackId}`, {
+      method: 'DELETE',
+    });
+    return response.ok;
+  } catch (error) {
+    console.error('API removeTrackFromPlaylist Error:', error.message);
+    return false;
+  }
+};
+
+/**
+ * Deletes an entire playlist.
+ * @param {string} playlistId
+ * @returns {Promise<boolean>} Success status.
+ */
+export const deletePlaylist = async (playlistId) => {
+  try {
+    const response = await fetch(`${BASE_URL}/playlists/${playlistId}`, {
+      method: 'DELETE',
+    });
+    return response.ok;
+  } catch (error) {
+    console.error('API deletePlaylist Error:', error.message);
+    return false;
+  }
 };
