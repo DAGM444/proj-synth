@@ -18,9 +18,16 @@ import { Slider } from "@/components/ui/slider";
 import QueuePanel from "@/components/QueuePanel";
 import FullScreenLyrics from "@/components/FullScreenLyrics";
 import { getStreamUrl } from "@/services/api";
+import { useAudioPlayer } from "@/context/PlayerContext";
 
-export default function AudioPlayer({ currentTrack }) {
-  const [isPlaying, setIsPlaying] = useState(false);
+export default function AudioPlayer({ currentTrack: propCurrentTrack }) {
+  const playerContext = useAudioPlayer();
+  const currentTrack = playerContext?.currentTrack || propCurrentTrack;
+  const isPlaying = playerContext?.isPlaying ?? false;
+  const setIsPlaying = playerContext?.setIsPlaying;
+  const nextTrack = playerContext?.nextTrack;
+  const prevTrack = playerContext?.prevTrack;
+
   const [isFavorite, setIsFavorite] = useState(false);
   const [shuffle, setShuffle] = useState(false);
   const [repeat, setRepeat] = useState("off"); // off | all | one
@@ -35,28 +42,62 @@ export default function AudioPlayer({ currentTrack }) {
 
   // Update audio source when currentTrack changes
   useEffect(() => {
-    if (currentTrack?.id && audioRef.current) {
-      const streamUrl = getStreamUrl(currentTrack.id);
+    const videoId = currentTrack?.videoId || currentTrack?.id;
+    if (videoId && audioRef.current) {
+      const streamUrl = getStreamUrl(videoId);
       audioRef.current.src = streamUrl;
       audioRef.current.play().then(() => {
-        setIsPlaying(true);
+        if (setIsPlaying) setIsPlaying(true);
       }).catch((err) => {
         console.error("Playback error:", err);
-        setIsPlaying(false);
+        if (setIsPlaying) setIsPlaying(false);
       });
+
+      if ('mediaSession' in navigator) {
+        navigator.mediaSession.metadata = new MediaMetadata({
+          title: currentTrack.title || 'Track',
+          artist: currentTrack.artist || 'Artist',
+          artwork: currentTrack.thumbnail ? [{ src: currentTrack.thumbnail }] : []
+        });
+      }
     }
-  }, [currentTrack]);
+  }, [currentTrack, setIsPlaying]);
+
+  // Sync isPlaying state with audio element
+  useEffect(() => {
+    if (!audioRef.current || !audioRef.current.src) return;
+    if (isPlaying && audioRef.current.paused) {
+      audioRef.current.play().catch((err) => console.error("Play error:", err));
+    } else if (!isPlaying && !audioRef.current.paused) {
+      audioRef.current.pause();
+    }
+  }, [isPlaying]);
 
   // Handle Play / Pause toggle
   const togglePlay = () => {
-    if (!audioRef.current) return;
-    if (isPlaying) {
-      audioRef.current.pause();
-      setIsPlaying(false);
+    if (playerContext?.togglePlay) {
+      playerContext.togglePlay();
     } else {
-      audioRef.current.play().then(() => {
-        setIsPlaying(true);
-      }).catch((err) => console.error("Play error:", err));
+      if (!audioRef.current) return;
+      if (isPlaying) {
+        audioRef.current.pause();
+        if (setIsPlaying) setIsPlaying(false);
+      } else {
+        audioRef.current.play().then(() => {
+          if (setIsPlaying) setIsPlaying(true);
+        }).catch((err) => console.error("Play error:", err));
+      }
+    }
+  };
+
+  const handleTrackEnded = () => {
+    if (repeat === "one" && audioRef.current) {
+      audioRef.current.currentTime = 0;
+      audioRef.current.play();
+    } else if (nextTrack) {
+      nextTrack();
+    } else if (setIsPlaying) {
+      setIsPlaying(false);
     }
   };
 
@@ -108,12 +149,14 @@ export default function AudioPlayer({ currentTrack }) {
   const trackArtist = currentTrack?.artist || "Select a track to listen";
   const trackThumbnail = currentTrack?.thumbnail || "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=120&h=120&fit=crop";
 
+  if (!currentTrack) return null;
+
   return (
     <>
       <audio
         ref={audioRef}
         onTimeUpdate={handleTimeUpdate}
-        onEnded={() => setIsPlaying(false)}
+        onEnded={handleTrackEnded}
       />
       <footer className="fixed bottom-0 left-0 right-0 z-50 h-[72px] md:h-20 bg-[#000000] border-t border-[#282828] px-3 md:px-4 flex items-center justify-between gap-2 md:gap-4">
         {/* Track info */}
@@ -164,6 +207,7 @@ export default function AudioPlayer({ currentTrack }) {
               <Shuffle className="w-4 h-4" />
             </button>
             <button
+              onClick={prevTrack}
               aria-label="Previous"
               className="text-[#b3b3b3] hover:text-white transition-colors"
             >
@@ -181,6 +225,7 @@ export default function AudioPlayer({ currentTrack }) {
               )}
             </button>
             <button
+              onClick={nextTrack}
               aria-label="Next"
               className="text-[#b3b3b3] hover:text-white transition-colors"
             >

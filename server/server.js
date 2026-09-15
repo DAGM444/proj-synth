@@ -208,6 +208,18 @@ app.delete('/api/tracks/:id', async (req, res) => {
   }
 });
 
+// Delete a track from a playlist by playlistId and trackId
+app.delete('/api/playlists/:playlistId/tracks/:trackId', async (req, res) => {
+  try {
+    const { trackId } = req.params;
+    await prisma.track.delete({ where: { id: trackId } });
+    res.json({ message: 'Track removed successfully.' });
+  } catch (error) {
+    console.error('Delete Track Error:', error);
+    res.status(500).json({ error: 'Failed to delete track.' });
+  }
+});
+
 // Delete an entire playlist
 app.delete('/api/playlists/:id', async (req, res) => {
   try {

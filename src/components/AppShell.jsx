@@ -2,7 +2,7 @@ import React from 'react';
 import { Outlet } from 'react-router-dom';
 import Sidebar from '@/components/Sidebar';
 import Header from '@/components/Header';
-import AudioPlayer from '@/components/Player';
+import AudioPlayer from '@/components/AudioPlayer';
 
 export default function AppShell({ currentTrack }) {
   return (

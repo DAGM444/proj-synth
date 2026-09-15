@@ -38,16 +38,17 @@ export const getStreamUrl = (videoId) => {
  * Fetches all playlists with their associated tracks.
  * @returns {Promise<Array>} List of playlist objects.
  */
-export const getPlaylists = async () => {
+export const fetchPlaylists = async () => {
   try {
     const response = await fetch(`${BASE_URL}/playlists`);
     if (!response.ok) throw new Error('Failed to fetch playlists');
     return await response.json();
   } catch (error) {
-    console.error('API getPlaylists Error:', error.message);
+    console.error('API fetchPlaylists Error:', error.message);
     return [];
   }
 };
+export const getPlaylists = fetchPlaylists;
 
 /**
  * Fetches a single playlist by ID.
@@ -98,11 +99,11 @@ export const addTrackToPlaylist = async (playlistId, track) => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        videoId: track.id || track.videoId,
+        videoId: track.videoId || track.id,
         title: track.title,
-        artist: track.artist,
-        duration: track.duration,
-        thumbnail: track.thumbnail,
+        artist: track.artist || 'Unknown Artist',
+        duration: track.duration || '0:00',
+        thumbnail: track.thumbnail || '',
       }),
     });
     if (!response.ok) throw new Error('Failed to add track to playlist');
@@ -114,13 +115,18 @@ export const addTrackToPlaylist = async (playlistId, track) => {
 };
 
 /**
- * Removes a track from a playlist by its database ID.
- * @param {string} trackId - Database ID of the track record.
+ * Removes a track from a playlist.
+ * Supports both removeTrackFromPlaylist(playlistId, trackId) and removeTrackFromPlaylist(trackId).
+ * @param {string} playlistId - Playlist ID or Track ID if single param.
+ * @param {string} [trackId] - Track database ID.
  * @returns {Promise<boolean>} Success status.
  */
-export const removeTrackFromPlaylist = async (trackId) => {
+export const removeTrackFromPlaylist = async (playlistId, trackId) => {
   try {
-    const response = await fetch(`${BASE_URL}/tracks/${trackId}`, {
+    const url = trackId
+      ? `${BASE_URL}/playlists/${playlistId}/tracks/${trackId}`
+      : `${BASE_URL}/tracks/${playlistId}`;
+    const response = await fetch(url, {
       method: 'DELETE',
     });
     return response.ok;
