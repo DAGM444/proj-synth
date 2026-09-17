@@ -1,7 +1,8 @@
 import React from 'react';
 import { usePlaylist } from '@/context/PlaylistContext';
 import { useAudioPlayer } from '@/context/PlayerContext';
-import { Play, Pause, Trash2, Clock, Music, Disc3, Plus, Search } from 'lucide-react';
+import { useAuth } from '@/context/AuthContext';
+import { Play, Pause, Trash2, Clock, Music, Disc3, Plus, Search, LogIn } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 export default function PlaylistView({ playlist: propPlaylist, onPlayTrack: propOnPlayTrack }) {
@@ -9,8 +10,10 @@ export default function PlaylistView({ playlist: propPlaylist, onPlayTrack: prop
     selectedPlaylist,
     removeTrackFromPlaylist,
     deletePlaylist,
-    setIsCreateModalOpen,
+    openCreateModal,
   } = usePlaylist();
+
+  const { isAuthenticated, openLoginModal } = useAuth();
 
   const {
     currentTrack,
@@ -26,6 +29,26 @@ export default function PlaylistView({ playlist: propPlaylist, onPlayTrack: prop
   const playlist = propPlaylist || selectedPlaylist;
 
   if (!playlist) {
+    if (!isAuthenticated) {
+      return (
+        <div className="flex flex-col items-center justify-center py-20 text-center px-4">
+          <div className="w-20 h-20 rounded-2xl bg-[#181818] border border-[#282828] flex items-center justify-center mb-4 text-[#1DB954]">
+            <LogIn className="w-10 h-10" />
+          </div>
+          <h2 className="text-xl font-bold text-white mb-2 font-heading">Sign in to view your library</h2>
+          <p className="text-sm text-[#b3b3b3] max-w-sm mb-6">
+            Log in to manage your playlists, save your favorite tracks, and sync across sessions.
+          </p>
+          <button
+            onClick={openLoginModal}
+            className="bg-[#1DB954] hover:bg-[#1ed760] text-black font-semibold px-6 py-2.5 rounded-full hover:scale-105 active:scale-95 transition-all flex items-center gap-2 font-heading text-sm"
+          >
+            <LogIn className="w-4 h-4" /> Log In
+          </button>
+        </div>
+      );
+    }
+
     return (
       <div className="flex flex-col items-center justify-center py-20 text-center px-4">
         <div className="w-20 h-20 rounded-2xl bg-[#181818] border border-[#282828] flex items-center justify-center mb-4 text-[#535353]">
@@ -36,7 +59,7 @@ export default function PlaylistView({ playlist: propPlaylist, onPlayTrack: prop
           Choose a playlist from your library or create a new one to start listening.
         </p>
         <button
-          onClick={() => setIsCreateModalOpen(true)}
+          onClick={openCreateModal}
           className="bg-[#1DB954] text-black font-semibold px-6 py-2.5 rounded-full hover:scale-105 active:scale-95 transition-all flex items-center gap-2 font-heading text-sm"
         >
           <Plus className="w-4 h-4" /> Create Playlist

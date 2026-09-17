@@ -1,9 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { usePlaylist } from '@/context/PlaylistContext';
-import { Plus, Check, ListPlus, FolderPlus } from 'lucide-react';
+import { useAuth } from '@/context/AuthContext';
+import { Plus, Check, ListPlus, FolderPlus, LogIn } from 'lucide-react';
 
 export default function AddToPlaylistDropdown({ track }) {
-  const { playlists, addTrackToPlaylist, setIsCreateModalOpen } = usePlaylist();
+  const { playlists, addTrackToPlaylist, openCreateModal } = usePlaylist();
+  const { isAuthenticated, openLoginModal } = useAuth();
   const [isOpen, setIsOpen] = useState(false);
   const [addedMap, setAddedMap] = useState({});
   const [justAdded, setJustAdded] = useState(null);
@@ -26,6 +28,11 @@ export default function AddToPlaylistDropdown({ track }) {
 
   const handleAddToPlaylist = async (e, playlist) => {
     e.stopPropagation();
+    if (!isAuthenticated) {
+      setIsOpen(false);
+      openLoginModal();
+      return;
+    }
     try {
       await addTrackToPlaylist(playlist.id, track);
       setAddedMap((prev) => ({ ...prev, [playlist.id]: true }));
@@ -42,16 +49,22 @@ export default function AddToPlaylistDropdown({ track }) {
   const handleOpenCreateModal = (e) => {
     e.stopPropagation();
     setIsOpen(false);
-    setIsCreateModalOpen(true);
+    openCreateModal();
+  };
+
+  const handleToggleOpen = (e) => {
+    e.stopPropagation();
+    if (!isAuthenticated) {
+      openLoginModal();
+      return;
+    }
+    setIsOpen((prev) => !prev);
   };
 
   return (
     <div className="relative" ref={dropdownRef}>
       <button
-        onClick={(e) => {
-          e.stopPropagation();
-          setIsOpen((prev) => !prev);
-        }}
+        onClick={handleToggleOpen}
         className={`p-1.5 rounded-full transition-all ${
           isOpen
             ? 'bg-[#1DB954] text-black scale-110'
@@ -68,7 +81,21 @@ export default function AddToPlaylistDropdown({ track }) {
           className="absolute right-0 top-8 z-50 w-56 bg-[#242424] border border-[#383838] rounded-xl shadow-2xl py-1.5 text-xs animate-in fade-in zoom-in-95 duration-100"
           onClick={(e) => e.stopPropagation()}
         >
-          {justAdded ? (
+          {!isAuthenticated ? (
+            <div className="p-3 text-center">
+              <p className="text-[#b3b3b3] text-xs mb-2">Sign in to save tracks</p>
+              <button
+                onClick={() => {
+                  setIsOpen(false);
+                  openLoginModal();
+                }}
+                className="w-full flex items-center justify-center gap-1.5 bg-[#1DB954] text-black font-bold py-1.5 px-3 rounded-full hover:scale-105 transition-all text-xs"
+              >
+                <LogIn className="w-3.5 h-3.5" />
+                Log In
+              </button>
+            </div>
+          ) : justAdded ? (
             <div className="px-3 py-3 text-center text-[#1DB954] font-medium flex items-center justify-center gap-1.5">
               <Check className="w-4 h-4" /> Added to {justAdded}!
             </div>

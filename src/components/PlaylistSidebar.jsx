@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { usePlaylist } from '@/context/PlaylistContext';
-import { Plus, ListMusic, Trash2, Music } from 'lucide-react';
+import { useAuth } from '@/context/AuthContext';
+import { Plus, ListMusic, Trash2, Music, LogIn } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 
 export default function PlaylistSidebar({ onSelectPlaylist, compact = false }) {
@@ -12,7 +13,10 @@ export default function PlaylistSidebar({ onSelectPlaylist, compact = false }) {
     deletePlaylist,
     isCreateModalOpen,
     setIsCreateModalOpen,
+    openCreateModal,
   } = usePlaylist();
+
+  const { isAuthenticated, openLoginModal } = useAuth();
 
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -62,32 +66,54 @@ export default function PlaylistSidebar({ onSelectPlaylist, compact = false }) {
       <div className="flex items-center justify-between px-3 py-2">
         <span className="text-xs font-bold uppercase tracking-wider text-[#b3b3b3] flex items-center gap-2">
           <ListMusic className="w-4 h-4 text-[#1DB954]" />
-          Playlists ({playlists.length})
+          Playlists ({isAuthenticated ? playlists.length : 0})
         </span>
         <button
-          onClick={() => setIsCreateModalOpen(true)}
+          onClick={openCreateModal}
           className="p-1.5 rounded-full text-[#b3b3b3] hover:text-white hover:bg-[#282828] transition-colors"
           title="Create Playlist"
+          aria-label="Create Playlist"
         >
           <Plus className="w-4 h-4" />
         </button>
       </div>
 
-      {/* Playlist List */}
+      {/* Playlist List / Unauthenticated prompt */}
       <div className="flex-1 overflow-y-auto space-y-0.5 px-2 py-1 scrollbar-thin">
-        {playlists.length === 0 ? (
+        {!isAuthenticated ? (
+          /* Unauthenticated Prompt */
+          <div className="px-4 py-8 text-center bg-[#181818]/60 rounded-xl mx-1 my-2 border border-[#282828]/60 flex flex-col items-center">
+            <div className="w-10 h-10 rounded-full bg-[#242424] flex items-center justify-center mb-3 text-[#1DB954]">
+              <LogIn className="w-5 h-5" />
+            </div>
+            <p className="font-semibold text-white text-xs mb-1 font-heading">
+              Log in to see your playlists
+            </p>
+            <p className="text-[11px] text-[#b3b3b3] mb-4 max-w-[200px] leading-relaxed">
+              Create and save your custom tracks and library.
+            </p>
+            <button
+              onClick={openLoginModal}
+              className="bg-[#1DB954] hover:bg-[#1ed760] text-black text-xs font-bold px-4 py-2 rounded-full hover:scale-105 active:scale-95 transition-all shadow-md shadow-[#1DB954]/20 font-heading"
+            >
+              Log In
+            </button>
+          </div>
+        ) : playlists.length === 0 ? (
+          /* Empty Playlists Prompt */
           <div className="px-3 py-6 text-center text-xs text-[#b3b3b3] bg-[#181818]/60 rounded-lg mx-1 my-2 border border-[#282828]/50">
             <Music className="w-6 h-6 mx-auto mb-2 text-[#535353]" />
             <p className="font-medium text-white mb-1">No playlists yet</p>
             <p className="mb-3 text-[11px]">Create your first playlist</p>
             <button
-              onClick={() => setIsCreateModalOpen(true)}
+              onClick={openCreateModal}
               className="bg-white text-black text-xs font-semibold px-3 py-1.5 rounded-full hover:scale-105 transition"
             >
               Create Playlist
             </button>
           </div>
         ) : (
+          /* User's Playlists */
           playlists.map((pl) => {
             const isSelected = selectedPlaylistId === pl.id;
             return (

@@ -3,11 +3,12 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClientInstance } from "@/lib/query-client";
 import { BrowserRouter as Router, Route, Routes } from "react-router-dom";
 import PageNotFound from "./lib/PageNotFound";
-import { AuthProvider } from "@/lib/AuthContext";
+import { AuthProvider } from "@/context/AuthContext";
 import { PlaylistProvider } from "@/context/PlaylistContext";
 import { PlayerProvider } from "@/context/PlayerContext";
 import ScrollToTop from "./components/ScrollToTop";
 import AppShell from "@/components/AppShell";
+import AuthModal from "@/components/AuthModal";
 import Home from "@/pages/Home";
 import Search from "@/pages/Search";
 import Playlist from "@/pages/Playlist";
@@ -37,6 +38,7 @@ function App() {
                 </Route>
                 <Route path="*" element={<PageNotFound />} />
               </Routes>
+              <AuthModal />
             </Router>
             <Toaster richColors theme="dark" position="bottom-right" />
           </PlaylistProvider>
