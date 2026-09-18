@@ -204,28 +204,153 @@ app.get('/api/auth/me', authenticateToken, async (req, res) => {
 });
 
 // ==========================================
-// 2. YOUTUBE SEARCH ENDPOINT
+// 2. YOUTUBE SEARCH & RELATED ENDPOINTS
 // ==========================================
 app.get('/api/search', async (req, res) => {
   try {
-    const query = req.query.q;
+    const query = (req.query.q || '').trim();
     if (!query) {
       return res.status(400).json({ error: 'Search query parameter "q" is required.' });
     }
 
-    const videos = await YouTube.search(query, { limit: 20, type: 'video' });
+    const type = (req.query.type || 'track').toLowerCase();
+    const limitParam = parseInt(req.query.limit, 10);
+    const limit = Math.min(Math.max(isNaN(limitParam) ? 20 : limitParam, 1), 50);
+
+    if (type === 'artist') {
+      // Search for artist / music channels and videos
+      const videos = await YouTube.search(query, { limit: Math.min(limit * 2, 50), type: 'video' });
+      const artistsMap = new Map();
+
+      videos.forEach((video) => {
+        const channelName = video.channel ? video.channel.name : null;
+        if (channelName && !artistsMap.has(channelName)) {
+          artistsMap.set(channelName, {
+            id: video.channel.id || video.id,
+            videoId: video.id,
+            title: channelName,
+            artist: 'Artist',
+            duration: 'Artist',
+            thumbnail:
+              (video.channel.icon && (video.channel.icon.url || video.channel.icon)) ||
+              (video.thumbnail ? video.thumbnail.url : ''),
+            album: channelName,
+            channel: {
+              id: video.channel.id || '',
+              name: channelName,
+              url: video.channel.url || '',
+              icon: (video.channel.icon && (video.channel.icon.url || video.channel.icon)) || '',
+            },
+            type: 'artist',
+          });
+        }
+      });
+
+      const artists = Array.from(artistsMap.values()).slice(0, limit);
+      return res.json(artists);
+    }
+
+    if (type === 'playlist') {
+      // Search for playlists / full albums
+      const playlistQuery = query.toLowerCase().includes('playlist') || query.toLowerCase().includes('album')
+        ? query
+        : `${query} playlist album`;
+      const videos = await YouTube.search(playlistQuery, { limit, type: 'video' });
+
+      const playlists = videos.map((video) => ({
+        id: video.id,
+        videoId: video.id,
+        title: video.title,
+        artist: video.channel ? video.channel.name : 'Various Artists',
+        duration: video.durationFormatted || 'Playlist',
+        thumbnail: video.thumbnail ? video.thumbnail.url : '',
+        album: video.title,
+        channel: {
+          id: video.channel?.id || '',
+          name: video.channel?.name || '',
+          url: video.channel?.url || '',
+          icon: (video.channel?.icon && (video.channel.icon.url || video.channel.icon)) || '',
+        },
+        type: 'playlist',
+      }));
+
+      return res.json(playlists);
+    }
+
+    // Default: type === 'track'
+    const videos = await YouTube.search(query, { limit, type: 'video' });
     const tracks = videos.map((video) => ({
       id: video.id,
+      videoId: video.id,
       title: video.title,
       artist: video.channel ? video.channel.name : 'Unknown Artist',
-      thumbnail: video.thumbnail ? video.thumbnail.url : '',
       duration: video.durationFormatted || '0:00',
+      thumbnail: video.thumbnail ? video.thumbnail.url : '',
+      album: video.channel ? video.channel.name : 'Single',
+      channel: {
+        id: video.channel?.id || '',
+        name: video.channel?.name || '',
+        url: video.channel?.url || '',
+        icon: (video.channel?.icon && (video.channel.icon.url || video.channel.icon)) || '',
+      },
+      type: 'track',
     }));
 
-    res.json(tracks);
+    return res.json(tracks);
   } catch (error) {
     console.error('Search API Error:', error);
     res.status(500).json({ error: 'Failed to search YouTube.' });
+  }
+});
+
+// Related tracks endpoint for auto-recommendations
+app.get('/api/related/:videoId', async (req, res) => {
+  try {
+    const { videoId } = req.params;
+    if (!videoId) {
+      return res.status(400).json({ error: 'Video ID is required.' });
+    }
+
+    let searchQuery = 'popular music hits';
+    try {
+      const video = await YouTube.getVideo(`https://www.youtube.com/watch?v=${videoId}`);
+      if (video) {
+        const channelName = video.channel ? video.channel.name : '';
+        const cleanTitle = (video.title || '')
+          .replace(/[\(\[\{].*?[\)\]\}]/g, '')
+          .replace(/[^\w\s]/g, ' ')
+          .trim();
+        searchQuery = channelName ? `${channelName} music` : `${cleanTitle} song`;
+      }
+    } catch (err) {
+      console.warn('Could not fetch video details for related query, using fallback:', err.message);
+    }
+
+    const searchResults = await YouTube.search(searchQuery, { limit: 15, type: 'video' });
+    const relatedTracks = searchResults
+      .filter((v) => v.id !== videoId)
+      .slice(0, 10)
+      .map((video) => ({
+        id: video.id,
+        videoId: video.id,
+        title: video.title,
+        artist: video.channel ? video.channel.name : 'Unknown Artist',
+        duration: video.durationFormatted || '0:00',
+        thumbnail: video.thumbnail ? video.thumbnail.url : '',
+        album: video.channel ? video.channel.name : 'Single',
+        channel: {
+          id: video.channel?.id || '',
+          name: video.channel?.name || '',
+          url: video.channel?.url || '',
+          icon: (video.channel?.icon && (video.channel.icon.url || video.channel.icon)) || '',
+        },
+        type: 'track',
+      }));
+
+    res.json(relatedTracks);
+  } catch (error) {
+    console.error('Related Tracks API Error:', error);
+    res.status(500).json({ error: 'Failed to fetch related tracks.' });
   }
 });
 

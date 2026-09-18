@@ -120,19 +120,45 @@ export const getMe = async () => {
 /**
  * Fetches search results from the backend Express server.
  * @param {string} query - The search query string.
- * @returns {Promise<Array>} Array of track objects.
+ * @param {Object|string} [options] - Options object { type, limit } or type string ('track' | 'artist' | 'playlist').
+ * @returns {Promise<Array>} Array of track, artist, or playlist objects.
  */
-export const searchTracks = async (query) => {
+export const searchTracks = async (query, options = {}) => {
   if (!query || !query.trim()) return [];
 
+  const type = typeof options === 'string' ? options : (options.type || 'track');
+  const limit = typeof options === 'object' && options.limit ? options.limit : 20;
+
   try {
-    const response = await fetch(`${BASE_URL}/search?q=${encodeURIComponent(query)}`);
+    const response = await fetch(
+      `${BASE_URL}/search?q=${encodeURIComponent(query.trim())}&type=${encodeURIComponent(type)}&limit=${limit}`
+    );
     if (!response.ok) {
       throw new Error(`Server returned status: ${response.status}`);
     }
     return await response.json();
   } catch (error) {
     console.error('API searchTracks Error:', error.message);
+    return [];
+  }
+};
+
+/**
+ * Fetches related YouTube audio recommendations for auto-playing after queue ends.
+ * @param {string} videoId - The YouTube video ID.
+ * @returns {Promise<Array>} Array of related track objects.
+ */
+export const getRelatedTracks = async (videoId) => {
+  if (!videoId) return [];
+
+  try {
+    const response = await fetch(`${BASE_URL}/related/${encodeURIComponent(videoId)}`);
+    if (!response.ok) {
+      throw new Error(`Server returned status: ${response.status}`);
+    }
+    return await response.json();
+  } catch (error) {
+    console.error('API getRelatedTracks Error:', error.message);
     return [];
   }
 };
