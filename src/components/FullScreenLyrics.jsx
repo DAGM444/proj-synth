@@ -1,4 +1,4 @@
-import React, { useRef } from "react";
+import React, { useRef, useEffect } from "react";
 import { ChevronDown } from "lucide-react";
 
 const lines = [
@@ -20,6 +20,47 @@ const lines = [
 
 export default function FullScreenLyrics({ open, onClose, track }) {
   const activeRef = useRef(null);
+  const activeIndex = 7;
+
+  // Keyboard shortcut listener (Escape to close) with cleanup
+  useEffect(() => {
+    if (!open) return;
+
+    const handleKeyDown = (e) => {
+      if (e.key === "Escape") {
+        onClose?.();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [open, onClose]);
+
+  // Smooth scroll active lyric into view with timer and animation frame cleanup
+  useEffect(() => {
+    if (!open || !activeRef.current) return;
+
+    let animFrameId = null;
+    const timerId = setTimeout(() => {
+      animFrameId = requestAnimationFrame(() => {
+        if (activeRef.current) {
+          activeRef.current.scrollIntoView({
+            behavior: "smooth",
+            block: "center",
+          });
+        }
+      });
+    }, 100);
+
+    return () => {
+      clearTimeout(timerId);
+      if (animFrameId !== null) {
+        cancelAnimationFrame(animFrameId);
+      }
+    };
+  }, [open, activeIndex]);
 
   if (!open) return null;
 
@@ -28,7 +69,6 @@ export default function FullScreenLyrics({ open, onClose, track }) {
     artist: "Neon Waves",
     cover: "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=600&h=600&fit=crop",
   };
-  const activeIndex = 7;
 
   return (
     <div className="fixed inset-0 z-[70] overflow-hidden">

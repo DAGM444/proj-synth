@@ -38,6 +38,7 @@ export default function Search({ onPlayTrack }) {
 
   // Debounced search effect (300ms)
   useEffect(() => {
+    let isCancelled = false;
     const trimmed = inputVal.trim();
     if (!trimmed) {
       setTracks([]);
@@ -58,27 +59,36 @@ export default function Search({ onPlayTrack }) {
             searchTracks(trimmed, { type: 'playlist', limit: 6 }),
           ]);
 
-          setTracks(tracksRes || []);
-          setArtists(artistsRes || []);
-          setPlaylists(playlistsRes || []);
+          if (!isCancelled) {
+            setTracks(tracksRes || []);
+            setArtists(artistsRes || []);
+            setPlaylists(playlistsRes || []);
+          }
         } else if (activeTab === 'tracks') {
           const res = await searchTracks(trimmed, { type: 'track', limit: 25 });
-          setTracks(res || []);
+          if (!isCancelled) setTracks(res || []);
         } else if (activeTab === 'artists') {
           const res = await searchTracks(trimmed, { type: 'artist', limit: 20 });
-          setArtists(res || []);
+          if (!isCancelled) setArtists(res || []);
         } else if (activeTab === 'playlists') {
           const res = await searchTracks(trimmed, { type: 'playlist', limit: 20 });
-          setPlaylists(res || []);
+          if (!isCancelled) setPlaylists(res || []);
         }
       } catch (err) {
-        console.error('Search error:', err);
+        if (!isCancelled) {
+          console.error('Search error:', err);
+        }
       } finally {
-        setLoading(false);
+        if (!isCancelled) {
+          setLoading(false);
+        }
       }
     }, 300);
 
-    return () => clearTimeout(timer);
+    return () => {
+      isCancelled = true;
+      clearTimeout(timer);
+    };
   }, [inputVal, activeTab]);
 
   const handleTrackClick = (track, trackList = tracks) => {

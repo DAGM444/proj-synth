@@ -1,6 +1,9 @@
 const express = require('express');
 const cors = require('cors');
 const http = require('http');
+const https = require('https');
+const { spawn, execFile } = require('child_process');
+const rateLimit = require('express-rate-limit');
 const YouTube = require('youtube-sr').default;
 const ytdl = require('@distube/ytdl-core');
 const { PrismaClient } = require('@prisma/client');
@@ -13,9 +16,103 @@ const PORT = process.env.PORT || 5000;
 const JWT_SECRET = process.env.JWT_SECRET || 'proj-synth-secret-jwt-key-2026';
 const prisma = new PrismaClient();
 
-// Enable CORS and JSON parsing
-app.use(cors());
+// Regex pattern for validating 11-character YouTube video IDs
+const VIDEO_ID_REGEX = /^[a-zA-Z0-9_-]{11}$/;
+
+// ----------------------------------------------------
+// CORS CONFIGURATION (Restrict to process.env.CLIENT_URL)
+// ----------------------------------------------------
+const clientUrl = process.env.CLIENT_URL ? process.env.CLIENT_URL.trim() : 'http://localhost:5173';
+const allowedOrigins = process.env.CLIENT_URL
+  ? process.env.CLIENT_URL.split(',').map((u) => u.trim())
+  : [clientUrl, 'http://localhost:5173', 'http://localhost:3000'];
+
+const corsOptions = {
+  origin: (origin, callback) => {
+    // Allow non-browser requests (e.g., server-to-server, curl, mobile apps)
+    if (!origin) return callback(null, true);
+
+    if (process.env.CLIENT_URL) {
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+      return callback(new Error('CORS blocked: Origin not allowed.'));
+    }
+
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+    return callback(new Error('CORS blocked: Origin not allowed.'));
+  },
+  credentials: true,
+};
+
+app.use(cors(corsOptions));
 app.use(express.json());
+
+// Handle CORS errors cleanly with 403 Forbidden
+app.use((err, req, res, next) => {
+  if (err && err.message && err.message.startsWith('CORS blocked:')) {
+    return res.status(403).json({ error: err.message });
+  }
+  next(err);
+});
+
+// ----------------------------------------------------
+// HEALTH CHECK ENDPOINTS
+// ----------------------------------------------------
+app.get(['/health', '/api/ping'], (req, res) => {
+  res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// ----------------------------------------------------
+// RATE LIMITING CONFIGURATION
+// ----------------------------------------------------
+const searchLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000, // 1 minute
+  max: 60, // Max 60 search requests per minute per IP
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many search requests, please try again later.' },
+});
+
+const streamLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000, // 1 minute
+  max: 100, // Max 100 stream requests per minute per IP
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many stream requests, please try again later.' },
+});
+
+app.use('/api/search', searchLimiter);
+app.use('/api/stream', streamLimiter);
+
+// ----------------------------------------------------
+// IN-MEMORY STREAM URL CACHE (2-hour TTL)
+// ----------------------------------------------------
+const STREAM_CACHE_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
+const streamUrlCache = new Map(); // videoId -> { url: string, expiresAt: number }
+
+// Periodically clean up expired cache entries every 15 minutes
+setInterval(() => {
+  const now = Date.now();
+  for (const [id, entry] of streamUrlCache.entries()) {
+    if (entry.expiresAt <= now) {
+      streamUrlCache.delete(id);
+    }
+  }
+}, 15 * 60 * 1000).unref();
+
+// ----------------------------------------------------
+// ROUTE PARAMETER VALIDATION & SANITIZATION
+// ----------------------------------------------------
+app.param('videoId', (req, res, next, videoId) => {
+  if (!videoId || typeof videoId !== 'string' || !VIDEO_ID_REGEX.test(videoId)) {
+    return res.status(400).json({ error: 'Invalid videoId parameter format. Must match /^[a-zA-Z0-9_-]{11}$/' });
+  }
+  req.params.videoId = videoId.trim();
+  next();
+});
 
 // ==========================================
 // AUTH MIDDLEWARE
@@ -206,7 +303,7 @@ app.get('/api/auth/me', authenticateToken, async (req, res) => {
 // ==========================================
 // 2. YOUTUBE SEARCH & RELATED ENDPOINTS
 // ==========================================
-app.get('/api/search', async (req, res) => {
+app.get('/api/search', searchLimiter, async (req, res) => {
   try {
     const query = (req.query.q || '').trim();
     if (!query) {
@@ -307,8 +404,8 @@ app.get('/api/search', async (req, res) => {
 app.get('/api/related/:videoId', async (req, res) => {
   try {
     const { videoId } = req.params;
-    if (!videoId) {
-      return res.status(400).json({ error: 'Video ID is required.' });
+    if (!videoId || !VIDEO_ID_REGEX.test(videoId)) {
+      return res.status(400).json({ error: 'Invalid videoId parameter format. Must match /^[a-zA-Z0-9_-]{11}$/' });
     }
 
     let searchQuery = 'popular music hits';
@@ -357,50 +454,181 @@ app.get('/api/related/:videoId', async (req, res) => {
 // ==========================================
 // 3. LIVE AUDIO STREAMING ENDPOINT
 // ==========================================
-app.get('/api/stream/:videoId', async (req, res) => {
-  try {
-    const videoId = req.params.videoId;
-    if (!videoId) {
-      return res.status(400).json({ error: 'Video ID parameter is required.' });
+app.get('/api/stream/:videoId', streamLimiter, async (req, res) => {
+  const { videoId } = req.params;
+
+  // Validate and sanitize videoId route parameter
+  if (!videoId || !VIDEO_ID_REGEX.test(videoId)) {
+    return res.status(400).json({ error: 'Invalid videoId parameter format. Must match /^[a-zA-Z0-9_-]{11}$/' });
+  }
+
+  // Set streaming headers expected by HTML5 audio players
+  res.setHeader('Content-Type', 'audio/mpeg');
+  res.setHeader('Accept-Ranges', 'bytes');
+
+  let childProcess = null;
+  let remoteReq = null;
+  let audioStream = null;
+  let clientAborted = false;
+
+  // Process cleanup handler: terminate spawned child processes & streams on client abort
+  req.on('close', () => {
+    clientAborted = true;
+    if (childProcess && !childProcess.killed) {
+      try {
+        childProcess.kill('SIGTERM');
+      } catch (e) {
+        // ignore
+      }
     }
+    if (remoteReq && typeof remoteReq.destroy === 'function') {
+      try {
+        remoteReq.destroy();
+      } catch (e) {
+        // ignore
+      }
+    }
+    if (audioStream && typeof audioStream.destroy === 'function') {
+      try {
+        audioStream.destroy();
+      } catch (e) {
+        // ignore
+      }
+    }
+  });
 
-    // Set streaming headers expected by HTML5 audio players
-    res.setHeader('Content-Type', 'audio/mpeg');
-    res.setHeader('Accept-Ranges', 'bytes');
+  const now = Date.now();
+  const cached = streamUrlCache.get(videoId);
 
-    const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
-    let streamHandled = false;
+  // 1. Check in-memory stream URL cache (2-hour TTL)
+  if (cached && cached.expiresAt > now) {
+    return pipeDirectAudioUrl(cached.url, req, res, (err) => {
+      if (err && !clientAborted) {
+        // If cached URL failed (e.g., expired upstream), prune cache and resolve fresh
+        streamUrlCache.delete(videoId);
+        resolveAndStream(videoId, req, res);
+      }
+    });
+  }
+
+  // 2. Resolve fresh stream URL via yt-dlp child process or fallbacks
+  resolveAndStream(videoId, req, res);
+
+  function resolveAndStream(vid, request, response) {
+    if (clientAborted || response.writableEnded) return;
+
+    const videoUrl = `https://www.youtube.com/watch?v=${vid}`;
+    // Strictly pass arguments array to prevent command injection
+    const ytDlpArgs = [
+      '-g',
+      '-f',
+      'bestaudio[ext=m4a]/bestaudio/best',
+      '--no-playlist',
+      '--no-warnings',
+      videoUrl,
+    ];
 
     try {
-      const audioStream = ytdl(videoUrl, {
+      childProcess = execFile('yt-dlp', ytDlpArgs, { timeout: 30000 }, (error, stdout) => {
+        childProcess = null;
+        if (clientAborted || response.writableEnded) return;
+
+        if (!error && stdout) {
+          const directUrl = stdout.trim().split('\n')[0].trim();
+          if (directUrl && directUrl.startsWith('http')) {
+            // Cache the resolved stream URL with a 2-hour TTL
+            streamUrlCache.set(vid, {
+              url: directUrl,
+              expiresAt: Date.now() + STREAM_CACHE_TTL_MS,
+            });
+
+            return pipeDirectAudioUrl(directUrl, request, response, (pipeErr) => {
+              if (pipeErr && !clientAborted && !response.headersSent) {
+                fallbackToYtdl(vid, request, response);
+              }
+            });
+          }
+        }
+
+        // If yt-dlp is not installed (ENOENT) or fails, fall back to ytdl-core
+        fallbackToYtdl(vid, request, response);
+      });
+    } catch (spawnErr) {
+      fallbackToYtdl(vid, request, response);
+    }
+  }
+
+  function pipeDirectAudioUrl(streamUrl, request, response, onError) {
+    if (clientAborted || response.writableEnded) return;
+
+    try {
+      const parsedUrl = new URL(streamUrl);
+      const httpModule = parsedUrl.protocol === 'http:' ? http : https;
+
+      remoteReq = httpModule.get(streamUrl, (remoteRes) => {
+        if (clientAborted || response.writableEnded) {
+          remoteRes.destroy();
+          return;
+        }
+
+        // Follow redirects if any
+        if (remoteRes.statusCode >= 300 && remoteRes.statusCode < 400 && remoteRes.headers.location) {
+          return pipeDirectAudioUrl(remoteRes.headers.location, request, response, onError);
+        }
+
+        if (remoteRes.statusCode !== 200 && remoteRes.statusCode !== 206) {
+          return onError(new Error(`Upstream returned status ${remoteRes.statusCode}`));
+        }
+
+        if (!response.headersSent) {
+          if (remoteRes.headers['content-type']) {
+            response.setHeader('Content-Type', remoteRes.headers['content-type']);
+          }
+          if (remoteRes.headers['content-length']) {
+            response.setHeader('Content-Length', remoteRes.headers['content-length']);
+          }
+        }
+
+        remoteRes.pipe(response);
+      });
+
+      remoteReq.on('error', (err) => {
+        if (!clientAborted) {
+          onError(err);
+        }
+      });
+    } catch (e) {
+      onError(e);
+    }
+  }
+
+  function fallbackToYtdl(vid, request, response) {
+    if (clientAborted || response.writableEnded) return;
+
+    const videoUrl = `https://www.youtube.com/watch?v=${vid}`;
+    let fallbackUsed = false;
+
+    try {
+      audioStream = ytdl(videoUrl, {
         filter: 'audioonly',
         highWaterMark: 1 << 25,
       });
 
-      audioStream.on('info', () => {
-        streamHandled = true;
-      });
-
       audioStream.on('error', (err) => {
         console.error('ytdl-core stream error (using audio stream fallback):', err.message);
-        if (!streamHandled) {
-          streamHandled = true;
-          pipeFallbackAudio(res);
+        if (!fallbackUsed && !response.writableEnded) {
+          fallbackUsed = true;
+          pipeFallbackAudio(response);
         }
       });
 
-      audioStream.pipe(res);
+      audioStream.pipe(response);
     } catch (err) {
       console.error('ytdl-core init exception (using audio stream fallback):', err.message);
-      if (!streamHandled) {
-        streamHandled = true;
-        pipeFallbackAudio(res);
+      if (!fallbackUsed && !response.writableEnded) {
+        fallbackUsed = true;
+        pipeFallbackAudio(response);
       }
-    }
-  } catch (error) {
-    console.error('Streaming API Error:', error);
-    if (!res.headersSent) {
-      res.status(500).json({ error: 'Failed to initiate stream.' });
     }
   }
 });
@@ -496,8 +724,8 @@ app.post('/api/playlists/:id/tracks', authenticateToken, async (req, res) => {
     const { id } = req.params;
     const { videoId, title, artist, duration, thumbnail } = req.body;
 
-    if (!videoId || !title) {
-      return res.status(400).json({ error: 'videoId and title are required.' });
+    if (!videoId || !title || !VIDEO_ID_REGEX.test(videoId)) {
+      return res.status(400).json({ error: 'Valid videoId (11 characters) and title are required.' });
     }
 
     // Verify playlist ownership
@@ -614,8 +842,10 @@ app.delete('/api/playlists/:id', authenticateToken, async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`Server listening on http://localhost:${PORT}`);
-});
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`Server listening on http://localhost:${PORT}`);
+  });
+}
 
 module.exports = app;

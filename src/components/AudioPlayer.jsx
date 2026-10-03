@@ -89,22 +89,29 @@ export default function AudioPlayer({ currentTrack: propCurrentTrack }) {
 
   // Update audio source when currentTrack changes
   useEffect(() => {
+    let isCancelled = false;
     const videoId = currentTrack?.videoId || currentTrack?.id;
-    if (videoId && audioRef.current) {
-      const streamUrl = getStreamUrl(videoId);
-      audioRef.current.src = streamUrl;
-      const vol = isMuted ? 0 : volume[0] / 100;
-      audioRef.current.volume = Math.max(0, Math.min(1, vol));
+    const audio = audioRef.current;
 
-      audioRef.current
-        .play()
-        .then(() => {
-          if (setIsPlaying) setIsPlaying(true);
-        })
-        .catch((err) => {
-          console.error("Playback error:", err);
-          if (setIsPlaying) setIsPlaying(false);
-        });
+    if (videoId && audio) {
+      const streamUrl = getStreamUrl(videoId);
+      audio.src = streamUrl;
+      const vol = isMuted ? 0 : volume[0] / 100;
+      audio.volume = Math.max(0, Math.min(1, vol));
+
+      const playPromise = audio.play();
+      if (playPromise !== undefined) {
+        playPromise
+          .then(() => {
+            if (!isCancelled && setIsPlaying) setIsPlaying(true);
+          })
+          .catch((err) => {
+            if (!isCancelled) {
+              console.error("Playback error:", err);
+              if (setIsPlaying) setIsPlaying(false);
+            }
+          });
+      }
 
       if ("mediaSession" in navigator) {
         navigator.mediaSession.metadata = new MediaMetadata({
@@ -114,17 +121,72 @@ export default function AudioPlayer({ currentTrack: propCurrentTrack }) {
         });
       }
     }
-  }, [currentTrack, setIsPlaying]);
+
+    return () => {
+      isCancelled = true;
+      if (audio) {
+        audio.pause();
+      }
+    };
+  }, [currentTrack, setIsPlaying, isMuted, volume]);
 
   // Sync isPlaying state with audio element
   useEffect(() => {
-    if (!audioRef.current || !audioRef.current.src) return;
-    if (isPlaying && audioRef.current.paused) {
-      audioRef.current.play().catch((err) => console.error("Play error:", err));
-    } else if (!isPlaying && !audioRef.current.paused) {
-      audioRef.current.pause();
+    const audio = audioRef.current;
+    if (!audio || !audio.src) return;
+    let isCancelled = false;
+
+    if (isPlaying && audio.paused) {
+      const playPromise = audio.play();
+      if (playPromise !== undefined) {
+        playPromise.catch((err) => {
+          if (!isCancelled) console.error("Play error:", err);
+        });
+      }
+    } else if (!isPlaying && !audio.paused) {
+      audio.pause();
     }
+
+    return () => {
+      isCancelled = true;
+    };
   }, [isPlaying]);
+
+  // Clean up MediaSession action handlers on unmount
+  useEffect(() => {
+    if (!("mediaSession" in navigator)) return;
+
+    try {
+      navigator.mediaSession.setActionHandler("play", () => {
+        if (togglePlayContext) togglePlayContext();
+        else audioRef.current?.play();
+      });
+      navigator.mediaSession.setActionHandler("pause", () => {
+        if (togglePlayContext) togglePlayContext();
+        else audioRef.current?.pause();
+      });
+      if (prevTrack) {
+        navigator.mediaSession.setActionHandler("previoustrack", prevTrack);
+      }
+      if (nextTrack) {
+        navigator.mediaSession.setActionHandler("nexttrack", nextTrack);
+      }
+    } catch {
+      // ignore
+    }
+
+    return () => {
+      if (!("mediaSession" in navigator)) return;
+      try {
+        navigator.mediaSession.setActionHandler("play", null);
+        navigator.mediaSession.setActionHandler("pause", null);
+        navigator.mediaSession.setActionHandler("previoustrack", null);
+        navigator.mediaSession.setActionHandler("nexttrack", null);
+      } catch {
+        // ignore
+      }
+    };
+  }, [togglePlayContext, prevTrack, nextTrack]);
 
   // Handle Play / Pause toggle
   const togglePlay = useCallback(() => {
